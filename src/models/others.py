@@ -5,7 +5,7 @@ from tensorflow.keras.utils import plot_model
 from tensorflow.keras.models import Model
 from tensorflow.keras.layers import AvgPool2D, MaxPool2D, Conv2D, BatchNormalization, Cropping2D, ReLU, Lambda, Add
 from tensorflow.keras.layers import DepthwiseConv2D, Concatenate, Softmax, Dropout, ZeroPadding2D, Conv2DTranspose
-from tensorflow.keras.layers import Layer, Input, ZeroPadding2D
+from tensorflow.keras.layers import Layer, Input, ZeroPadding2D, UpSampling2D
 from tensorflow.keras.applications.vgg16 import VGG16
 from tensorflow.keras.applications.resnet import ResNet101, ResNet50
 from tensorflow.keras.regularizers import l2
@@ -64,7 +64,7 @@ class NIN(Layer):
 
 
 class CnnsFcn(Model):
-    def __init__(self, input_shape=(227,227,3)):
+    def __init__(self, input_shape=(227,227,3), n_classes=8):
         super(CnnsFcn, self).__init__()
 
         inp            = Input(shape=input_shape)
@@ -83,17 +83,17 @@ class CnnsFcn(Model):
         drop7          = Dropout(0.5)(conv_fc7)                                                 #4096x10x10  4096x10x10  conv_fc7
         nin_fc7        = NIN(3, [8, 8], [1,1])(drop7)
                                                 #4096x10x10  8x10x10     drop7
-        up1            = Conv2DTranspose(8, 4, strides=2)(nin_fc7)                              #8x10x10     8x20x20     nin_fc7
+        up1            = Conv2DTranspose(n_classes, 4, strides=2)(nin_fc7)                              #8x10x10     8x20x20     nin_fc7
         crphb = int((conv5.shape[1] - up1.shape[1])/2)
         crpht = (conv5.shape[1] - up1.shape[1]) - crphb
         crpwb = int((conv5.shape[2] - up1.shape[2])/2)
         crpwt = (conv5.shape[2] - up1.shape[2]) - crpwb
         crop_conv5     = Cropping2D(cropping=((crpht, crphb), (crpwt, crpwb)))(conv5)                           #512x35x35   512x20x20   conv5
-        nin_crop_conv5 = NIN(3, [8, 8], [1,1])(crop_conv5)                                      #512x20x20   8x20x20     crop_conv5
+        nin_crop_conv5 = NIN(3, [n_classes, n_classes], [1,1])(crop_conv5)                                      #512x20x20   8x20x20     crop_conv5
         fuse1          = Add()([up1, nin_crop_conv5])                                             #8x20x20     up1, nin_crop_conv5
         
-        up2            = Conv2DTranspose(8, 4, strides=2)(fuse1)                                #8x20x20     8x40x40     fuse1
-        nin_pool1      = NIN(3, [8, 8], [1,1])(pool1)                                           #96x75x75    8x75x75     pool1
+        up2            = Conv2DTranspose(n_classes, 4, strides=2)(fuse1)                                #8x20x20     8x40x40     fuse1
+        nin_pool1      = NIN(3, [n_classes, n_classes], [1,1])(pool1)                                           #96x75x75    8x75x75     pool1
         drop_nin_pool1 = Dropout(0.5)(nin_pool1)
         crphb = int((drop_nin_pool1.shape[1] - up2.shape[1])/2)
         crpht = (drop_nin_pool1.shape[1] - up2.shape[1]) - crphb
@@ -102,8 +102,8 @@ class CnnsFcn(Model):
         crop_nin_pool1 = Cropping2D(cropping=((crpht, crphb), (crpwt, crpwb)))(drop_nin_pool1)              #8x75x75     8x40x40     drop_nin_pool1
         fuse2          = Add()([up2, crop_nin_pool1])
                                               #8x40x40     up2, crop_nin_pool1
-        up3            = Conv2DTranspose(8, 5, strides=3)(fuse2)                                #8x40x40     8x120x120   fuse2
-        nin_conv1      = NIN(3, [8, 8], [1,1])(conv1)
+        up3            = Conv2DTranspose(n_classes, 5, strides=3)(fuse2)                                #8x40x40     8x120x120   fuse2
+        nin_conv1      = NIN(3, [n_classes, n_classes], [1,1])(conv1)
         crphb = int((nin_conv1.shape[1] - up3.shape[1])/2)
         crpht = (nin_conv1.shape[1] - up3.shape[1]) - crphb
         crpwb = int((nin_conv1.shape[2] - up3.shape[2])/2)
@@ -114,10 +114,11 @@ class CnnsFcn(Model):
         super(CnnsFcn, self).__init__(inputs=inp, outputs=fuse3, name='cnns_fcn')
 
 
+ 
 
 
 class Darkfcn(Model):
-    def __init__(self, input_shape=(300,300,3)):
+    def __init__(self, input_shape=(300,300,3), n_classes=8):
         super(Darkfcn, self).__init__()
         #name         type                   units    sz    st    inshape     outshape    inputs
         #-----------  ---------------------  -------  ----  ----  ----------  ----------  ----------------
@@ -214,16 +215,97 @@ class Darkfcn(Model):
             up5c = ZeroPadding2D(padding=((-crpht, -crphb), (-crpwt, -crpwb)))(up5)
         else:
             up5c        = Cropping2D(cropping=((crpht, crphb), (crpwt, crpwb)))(up5      )       #64x320x320  64x300x300
-        up5ninc     = NIN(3,[8,8], [1,1])(up5c)                                            #64x300x300  8x300x300
+        up5ninc     = NIN(3,[n_classes,n_classes], [1,1])(up5c)                                            #64x300x300  8x300x300
         super(Darkfcn, self).__init__(inputs=inp, outputs=up5ninc, name='darkfcn')
 
 
+
+class UpNet(Model):
+    def __init__(self, input_shape=(300,300,3), n_classes=8):
+        super(UpNet, self).__init__()
+        # 300x300x3->
+        # 318x318x64  2cv1p->
+        # 159x159x128 2vc1p->
+        # 80x80x256   3cv1p->
+        # 40x40x512   3cv1p-> 
+        # 20x20x512   3vc1p-> 
+        # 8x8x1024    2cv ->|| 
+        
+        # 12x12xnc    1ur1cvd -> 
+        # 26x26xnc    1ur1cv-> 
+        # 54x54xnc    1ur1cv-> 
+        # 110x110xnc  1ur1cv -> 
+        # 182x182xnc  1ur1sfm ->
+        # 300x300
+        c_scalar = 2;
+
+        inp    = Input(shape=input_shape)
+        zp1     = ZeroPadding2D(padding=(9,9))                                 (   inp)
+        conv1a = Conv2D(64, 3, strides = 1, padding="same", activation='relu') (   zp1) #318   				
+        conv1b = Conv2D(64, 3, strides = 1, padding="same", activation='relu') (conv1a)     				
+        pool1  = MaxPool2D((2, 2), strides=2)                                  (conv1b)               
+        
+        conv2a = Conv2D(128, 3, strides = 1, padding="same", activation='relu')( pool1) #159			
+        conv2b = Conv2D(128, 3, strides = 1, padding="same", activation='relu')(conv2a)
+        zp2     = ZeroPadding2D(padding=(1,1))                                 (conv2b)  				
+        pool2  = MaxPool2D((2, 2), strides=2)                                  (   zp2)                  
+        
+        
+        conv3a = Conv2D(256, 3, strides = 1, padding="same", activation='relu')( pool2)  #80 
+        conv3b = Conv2D(256, 3, strides = 1, padding="same", activation='relu')(conv3a)  
+        conv3c = Conv2D(256, 3, strides = 1, padding="same", activation='relu')(conv3b)  
+        pool3  = MaxPool2D((2, 2), strides=2)                                  (conv3c)    
+
+        conv4a = Conv2D(512, 3, strides = 1, padding="same", activation='relu')( pool3) #40
+        conv4b = Conv2D(512, 3, strides = 1, padding="same", activation='relu')(conv4a)  
+        conv4c = Conv2D(512, 3, strides = 1, padding="same", activation='relu')(conv4b)  
+        pool4  = MaxPool2D((2, 2), strides=2)                                  (conv4c)   
+
+        conv5a = Conv2D(512, 3, strides = 1, padding="same", activation='relu')( pool4) #20
+        conv5b = Conv2D(512, 3, strides = 1, padding="same", activation='relu')(conv5a)  
+        conv5c = Conv2D(512, 3, strides = 1, padding="same", activation='relu')(conv5b)  
+        pool5  = MaxPool2D((2, 2), strides=2)                                  (conv5c) 
+
+        conv6a = Conv2D(1024, 3, strides = 1, padding="valid", activation='relu')(pool5) #8
+        conv6b = Conv2D(1024, 3, strides = 1, padding="same")(conv6a)  
+
+        up1    = Conv2DTranspose(c_scalar*n_classes, 5, strides=1, padding='valid', activation='relu')(conv6b)   
+        conv_up1 = Conv2D(c_scalar*n_classes, 3, strides = 1, padding="same")(up1) 
+        dp = Dropout(0.5)(conv_up1)
+        
+        up2    = Conv2DTranspose(c_scalar*n_classes, 4, strides=2, padding='valid', activation='relu')(dp)   
+        conv_up2 = Conv2D(c_scalar*n_classes, 3, strides = 1, padding="same")(up2) 
+        
+        up3    = Conv2DTranspose(c_scalar*n_classes, 4, strides=2, padding='valid', activation='relu')(conv_up2)   
+        conv_up3 = Conv2D(c_scalar*n_classes, 3, strides = 1, padding="same")(up3) 
+        
+        up4    = Conv2DTranspose(c_scalar*n_classes, 4, strides=2, padding='valid', activation='relu')(conv_up3)   
+        conv_up4 = Conv2D(c_scalar*n_classes, 3, strides = 1, padding="same")(up4) 
+        
+        up5 = Lambda(lambda x: tf.image.resize(x,(182,182),
+                            method=tf.image.ResizeMethod.BILINEAR),
+                            name='up5')(conv_up4)
+        relu_up5 = ReLU()(up5)
+        conv_up5 = Conv2D(n_classes, 3, strides = 1, padding="same")(relu_up5) 
+        
+        up6 = Lambda(lambda x: tf.image.resize(x,(300,300),
+                            method=tf.image.ResizeMethod.BILINEAR),
+                            name='up6')(conv_up5)  
+        sf = Softmax()(up6)
+        UpSampling2D(interpolation='bilinear')
+                                  
+        super(UpNet, self).__init__(inputs=inp, outputs=sf, name='upnet')
+     
+
+
 # cnns_fcn = Model(inputs=inp, outputs=fuse3, name='cnns_fcn')
-cnns_fcn = CnnsFcn()
-darkfcn = Darkfcn()
+cnns_fcn = CnnsFcn(input_shape=(300,300,3), n_classes=5)
+darkfcn = Darkfcn(input_shape=(300,300,3), n_classes=5)
+upnet = UpNet(input_shape=(300,300,3), n_classes=5)
 #cnns_fcn.build((None, 227,227,3))
 cnns_fcn.summary()
 darkfcn.summary()
+upnet.summary()
 
 
 

@@ -9,6 +9,7 @@ import sys
 import os
 sys.path.append(os.path.dirname(__file__) + '/..')
 from models.cmsnet import CMSNet
+from models.others import CnnsFcn, Darkfcn, UpNet
 from evaluation.others import load_model
 import time
 build_path = os.path.dirname(__file__) + '/../../build/'
@@ -36,7 +37,9 @@ def inference_test(test_case, test_divisor, infb4):
     test_size =int(number_of_testes/test_divisor)
     inference_time_b4 = np.array([])
     
-    if "CMSNet" in test_case['name']:
+    if ("CMSNet" in test_case['name'] or "cnns_fcn" in test_case['name'] or 
+        "darkfcn" in test_case['name'] or "upnet" in test_case['name']):
+        
         height_crop=  test_case['height']
         width_crop= test_case['width']
         channels= test_case['ch']
@@ -49,31 +52,55 @@ def inference_test(test_case, test_divisor, infb4):
         if test_case['mltgpu']:
             strategy = tf.distribute.MirroredStrategy()
             with strategy.scope():
-                kaminonet = CMSNet(dl_input_shape=(None, height_crop, 
+                if "CMSNet" in test_case['name']:
+                    model = CMSNet(dl_input_shape=(None, height_crop, 
                             width_crop, channels), num_classes=n_classes, 
                             output_stride=output_stride, pooling=pooling, 
                             residual_shortcut=residual_shortcut)
-                #kaminonet.summary()
-                print("Parameters: "+str(kaminonet.count_params()))
+                elif "cnns_fcn" in test_case['name']:
+                    model = CnnsFcn(input_shape=(height_crop, width_crop, channels), 
+                                    n_classes=n_classes)
+                elif "darkfcn" in test_case['name']:
+                    model = Darkfcn(input_shape=(height_crop, width_crop, channels), 
+                                    n_classes=n_classes)
+                elif "upnet" in test_case['name']:
+                    model = UpNet(input_shape=(height_crop, width_crop, channels), 
+                                  n_classes=n_classes)
+                else:
+                    print("Error...:")
+                #model.summary()
+                print("Parameters: "+str(model.count_params()))
         
         else:
-            kaminonet = CMSNet(dl_input_shape=(None, height_crop, width_crop, 
-                               channels), num_classes=n_classes, 
-                               output_stride=output_stride, pooling=pooling, 
-                               residual_shortcut=residual_shortcut)
-            #kaminonet.summary()
+            if "CMSNet" in test_case['name']:
+                model = CMSNet(dl_input_shape=(None, height_crop, 
+                        width_crop, channels), num_classes=n_classes, 
+                        output_stride=output_stride, pooling=pooling, 
+                        residual_shortcut=residual_shortcut)
+            elif "cnns_fcn" in test_case['name']:
+                model = CnnsFcn(input_shape=(height_crop, width_crop, channels), 
+                                n_classes=n_classes)
+            elif "darkfcn" in test_case['name']:
+                model = Darkfcn(input_shape=(height_crop, width_crop, channels), 
+                                n_classes=n_classes)
+            elif "upnet" in test_case['name']:
+                model = UpNet(input_shape=(height_crop, width_crop, channels), 
+                              n_classes=n_classes)
+            else:
+                print("Error...:")
+            #model.summary()
     
         
         image = np.random.rand(number_of_testes, 1,height_crop, width_crop,3)
         
-        kaminonet.predict(np.ones((1,height_crop, width_crop,3)))
-        kaminonet.predict(np.ones((1,height_crop, width_crop,3)))
+        model.predict(np.ones((1,height_crop, width_crop,3)))
+        model.predict(np.ones((1,height_crop, width_crop,3)))
         
         inference_time = np.zeros(number_of_testes)
         for i in range(test_divisor):
             for j in range(test_size):
                 start = time.time()
-                data_output = kaminonet.predict(image[test_size*i+j])
+                data_output = model.predict(image[test_size*i+j])
                 inference_time[test_size*i+j] = time.time()-start
     
         
@@ -81,14 +108,15 @@ def inference_test(test_case, test_divisor, infb4):
         if infb4:
             inference_time_b4 = np.zeros(number_of_testes)
             image = np.random.rand(number_of_testes, 4,height_crop, width_crop,3)
-            kaminonet.predict(np.ones((1,height_crop, width_crop,3)))
-            kaminonet.predict(np.ones((1,height_crop, width_crop,3)))
+            model.predict(np.ones((1,height_crop, width_crop,3)))
+            model.predict(np.ones((1,height_crop, width_crop,3)))
             
             for i in range(test_divisor):
                 for j in range(test_size):
                     start = time.time()
-                    data_output = kaminonet.predict(image[test_size*i+j])
+                    data_output = model.predict(image[test_size*i+j])
                     inference_time_b4[test_size*i+j] = (time.time()-start)/4
+        
     else: #If not CMSNet
         print(test_case['name'])
         [model, height_image, width_image] = load_model(test_case['model'])
@@ -106,12 +134,14 @@ def inference_test(test_case, test_divisor, infb4):
         
 
     
+
+    ###############TBR###############################
     #     mean_inference_time_b4 = (inference_time_b4).mean()*1000
     #     inference_time_b4_std = (inference_time_b4).std()*1000
         
     
     #     print("=======================================================================")
-    #     print(str(output_stride)+',  '+ pooling+', r:'+ str(residual_shortcut) +', p:' +str(kaminonet.count_params()))
+    #     print(str(output_stride)+',  '+ pooling+', r:'+ str(residual_shortcut) +', p:' +str(model.count_params()))
     #     print("-----------------------------------------------------------------------")
     #     print("m iftm b1 | std iftm b1 | m fps b1 | m iftm b4 | std iftm b4 | m fps b4")
     #     print(str(round(mean_inference_time_b1*100)/100)+' ms &  '+str(round(inference_time_b1_std*100)/100)+' ms &     '
@@ -121,7 +151,7 @@ def inference_test(test_case, test_divisor, infb4):
     #     print("=======================================================================")
     # else:
     #     print("=======================================================================")
-    #     print(str(output_stride)+',  '+ pooling+', r:'+ str(residual_shortcut) +', p:' +str(kaminonet.count_params()))
+    #     print(str(output_stride)+',  '+ pooling+', r:'+ str(residual_shortcut) +', p:' +str(model.count_params()))
     #     print("-----------------------------------------------------------------------")
     #     print("m iftm b1 | std iftm b1 | m fps b1 ")
     #     print(str(round(mean_inference_time_b1*100)/100)+' ms &  '+str(round(inference_time_b1_std*100)/100)+' ms &     '
@@ -131,6 +161,7 @@ def inference_test(test_case, test_divisor, infb4):
     #     mean_inference_time_b4 = 0
     #     inference_time_b4_std = 0
     # return mean_inference_time_b1, inference_time_b1_std, mean_inference_time_b4, inference_time_b4_std
+    ###############TBR###############################
     return inference_time, inference_time_b4
 
 def generate_latex_boxplot(test_cases, offset=0, print_label=True):
@@ -230,51 +261,61 @@ test_cases = [
     ]
 
 
-# #Comparison other works
-# ntests = 500
-# test_divisor = 5
-# sleep_time = 10
-# plot_resolution = True
-# infb4 = True
-
-# test_cases = [
-#         {'pool' : 'global', 'os' : 8,  'residual':False, 'ch' : 3, 'cls' : 5, 'ntests' : ntests, 'mltgpu':False, 'height' : 227, 'width'  : 227},
-#         {'pool' : 'spp'   , 'os' : 8,  'residual':False, 'ch' : 3, 'cls' : 5, 'ntests' : ntests, 'mltgpu':False, 'height' : 227, 'width'  : 227},
-#         {'pool' : 'global', 'os' : 16, 'residual':False, 'ch' : 3, 'cls' : 5, 'ntests' : ntests, 'mltgpu':False, 'height' : 227, 'width'  : 227},
-#         {'pool' : 'spp'   , 'os' : 16, 'residual':False, 'ch' : 3, 'cls' : 5, 'ntests' : ntests, 'mltgpu':False, 'height' : 227, 'width'  : 227},
-#         {'pool' : 'global', 'os' : 8,  'residual':False, 'ch' : 3, 'cls' : 5, 'ntests' : ntests, 'mltgpu':False, 'height' : 300, 'width'  : 300},
-#         {'pool' : 'spp'   , 'os' : 8,  'residual':False, 'ch' : 3, 'cls' : 5, 'ntests' : ntests, 'mltgpu':False, 'height' : 300, 'width'  : 300},
-#         {'pool' : 'global', 'os' : 16, 'residual':False, 'ch' : 3, 'cls' : 5, 'ntests' : ntests, 'mltgpu':False, 'height' : 300, 'width'  : 300},
-#         {'pool' : 'spp'   , 'os' : 16, 'residual':False, 'ch' : 3, 'cls' : 5, 'ntests' : ntests, 'mltgpu':False, 'height' : 300, 'width'  : 300},
-#         {'pool' : 'global', 'os' : 8,  'residual':False, 'ch' : 3, 'cls' : 5, 'ntests' : ntests, 'mltgpu':False, 'height' : 448, 'width'  : 448},
-#         {'pool' : 'spp'   , 'os' : 8,  'residual':False, 'ch' : 3, 'cls' : 5, 'ntests' : ntests, 'mltgpu':False, 'height' : 448, 'width'  : 448},
-#         {'pool' : 'global', 'os' : 16, 'residual':False, 'ch' : 3, 'cls' : 5, 'ntests' : ntests, 'mltgpu':False, 'height' : 448, 'width'  : 448},
-#         {'pool' : 'spp'   , 'os' : 16, 'residual':False, 'ch' : 3, 'cls' : 5, 'ntests' : ntests, 'mltgpu':False, 'height' : 448, 'width'  : 448},
-#       ]
 
 
-
-
-
-for  test_case, i in zip(test_cases, range(len(test_cases))):
-    time.sleep(sleep_time)
-    print("==================================")
-    print(test_case['name'])
-    inftime, inftime_b4 = inference_test(test_case=test_case, 
-                                          test_divisor=test_divisor, 
-                                          infb4=infb4)
-    test_cases[i]['inftime']    = inftime.tolist()
-    test_cases[i]['inftime_b4'] = inftime_b4.tolist()
-    print("==================================")
-    tf.keras.backend.clear_session()
-
-with open(build_path+'test_cases2.txt', 'w') as file:
-    file.write(json.dumps(test_cases))
+#General case
+ntests = 100
+test_divisor=1
+sleep_time = 0
+plot_resolution = False
+infb4 = True
+test_cases = [
+    {'abbr' : 'CM0-300',   'name' : 'CMSNet-M0','model': '','pool' : 'global', 'os' : 8, 
+        'residual':False, 'ch' : 3, 'cls' : 5, 'ntests' : ntests, 'mltgpu':False, 
+        'height' : 300, 'width'  : 300},
+    {'abbr' : 'CM0-448',   'name' : 'CMSNet-M0','model': '','pool' : 'global', 'os' : 8, 
+        'residual':False, 'ch' : 3, 'cls' : 5, 'ntests' : ntests, 'mltgpu':False, 
+        'height' : 448, 'width'  : 448},
+    {'abbr' : 'CM3-300',   'name' : 'CMSNet-M3','model': '','pool' : 'global', 'os' : 16, 
+      'residual':False, 'ch' : 3, 'cls' : 5, 'ntests' : ntests, 'mltgpu':False, 
+      'height' : 300, 'width'  : 300},
+    {'abbr' : 'CM3-448',   'name' : 'CMSNet-M3','model': '','pool' : 'global', 'os' : 16, 
+      'residual':False, 'ch' : 3, 'cls' : 5, 'ntests' : ntests, 'mltgpu':False, 
+      'height' : 448, 'width'  : 448},
+    {'abbr' : 'upnet-300',  'name' : 'upnet','ntests' : ntests, 'model': '','mltgpu':False, 
+      'height' : 300, 'width'  : 300,'pool' : '', 'os' : '', 
+        'residual':'', 'ch' : 3, 'cls' :  5},
+    {'abbr' : 'cnns_fcn-227',   'name' : 'cnns_fcn','ntests' : ntests, 'model': '','mltgpu':False, 
+     'height' : 227, 'width'  : 227, 'pool' : '', 'os' : '', 
+      'residual':'', 'ch' : 3, 'cls' :  5},
+    {'abbr' : 'darkfcn-448', 'name' : 'darkfcn','ntests' : ntests,'model': '','mltgpu':False, 
+      'height' : 448, 'width'  : 448,'pool' : '', 'os' : '', 
+        'residual':'', 'ch' : 3, 'cls' :  5},
+    ]
 
 
 
+recalcalculate = True
+if recalcalculate==True:
+    for  test_case, i in zip(test_cases, range(len(test_cases))):
+        time.sleep(sleep_time)
+        print("==================================")
+        print(test_case['name'])
+        inftime, inftime_b4 = inference_test(test_case=test_case, 
+                                              test_divisor=test_divisor, 
+                                              infb4=infb4)
+        test_cases[i]['inftime']    = inftime.tolist()
+        test_cases[i]['inftime_b4'] = inftime_b4.tolist()
+        print("==================================")
+        tf.keras.backend.clear_session()
+    
+    with open(build_path+'test_cases3.txt', 'w') as file:
+        file.write(json.dumps(test_cases))
 
-with open(build_path+'test_cases2.txt', 'r') as file:
+
+
+
+with open(build_path+'test_cases3.txt', 'r') as file:
     test_cases = json.loads(file.read())
 
 
@@ -325,7 +366,7 @@ generate_latex_mean_std(test_cases)
 
 
 
-
+##################TBR##############
 # if plot_resolution :
 #     r = np.zeros((len(test_cases), 4))
 #     for t, i in zip(test_cases, range(len(test_cases))):
