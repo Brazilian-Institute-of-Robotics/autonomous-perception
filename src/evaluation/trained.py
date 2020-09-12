@@ -876,8 +876,147 @@ def eval_models2(pooling = 'global',
     result['count_params'] = cmsnet.count_params()
     return result
     
+def eval_one(pooling = 'global',
+    backbonetype ='mobilenetv2',
+    output_stride = 8,
+    residual_shortcut = False, 
+    height_image = 448, 
+    width_image = 448, 
+    channels = 3, 
+    crop_enable = False,
+    height_crop = 448, 
+    width_crop = 448, 
+    
+    debug_en = False, 
+    dataset_name = 'freiburg_forest', 
+    class_imbalance_correction = False, 
+    data_augmentation = True, 
+     
+    multigpu_enable = True,
+    
+    batch_size = 32, 
+    epochs = 300, 
+    initial_epoch = -1, 
+    continue_traning = False, 
+    fine_tune_last = False, 
+    
+    base_learning_rate = 0.007, 
+    learning_power = 0.98, 
+    decay_steps = 1,
+    learning_rate_decay_step = 300, 
+    
+    decay = 5**(-4),
+    image = [],
+    ):
+    
+    
+    fold_name = (backbonetype+'s'+str(output_stride)+'_pooling_' + pooling
+             +('_residual_shortcut' if residual_shortcut else '')+'_ep'+str(epochs)
+             +('_crop_'+str(height_crop)+'x'+str(width_crop) if crop_enable else '_')
+             +('from' if crop_enable else '')+str(height_image)+'x'+str(width_image)
+             +'_'+('wda_' if data_augmentation else 'nda_')
+             +('wcic_' if class_imbalance_correction else 'ncic_')
+             +('wft_' if fine_tune_last else 'nft_')+dataset_name+'_b'
+             +str(batch_size)+('_n' if multigpu_enable else '_1')+'gpu')
+    
+    
+    
+    #Override params for eval
+    # multigpu_enable = False
+    # batch_size      = 2
+
+
+    ## Check the number of labels
+    if dataset_name == 'cityscape':
+        classes = cityscape.classes
+    elif dataset_name == 'citysmall':
+        classes = citysmall.classes
+    elif dataset_name == 'off_road_small':
+        classes = off_road_small.classes
+    elif dataset_name == 'freiburg_forest':
+        classes = freiburg_forest.classes
+    
+    n_classes = len(classes)
     
 
+    if crop_enable:
+        assert(height_crop == width_crop, "When crop is enable height_crop should be equals to width_crop")
+        assert(height_crop <= height_image, "When crop is enable height_crop should be less than or equals to height_image")
+        assert(width_crop <= width_image, "When crop is enable height_crop should be less than or equals to width_image")
+    else:
+        height_crop = height_image
+        width_crop = width_image
+    
+    
+    # Construct a tf.data.Dataset
+    info = tfds.builder(dataset_name).info
+    print(info)
+    [ds_test] = tfds.load(name=dataset_name, split=["test"], as_supervised=True)
+    # Add normalize
+    def _normalize_img(image):
+        image = tf.cast(image, tf.float32)/127.5 - 1
+        if crop_enable:
+            y1 = tf.random.uniform(shape=[], minval = 0., maxval = (height_image-height_crop)/height_image, dtype=tf.float32)
+            x1 = tf.random.uniform(shape=[], minval = 0., maxval = (width_image-width_crop)/width_image, dtype=tf.float32)
+    
+            y2 = y1 + (height_crop/height_image)
+            x2 = x1 + (width_crop/width_image)
+    
+            boxes = [[y1, x1, y2, x2]]
+            image = tf.image.crop_and_resize([image], boxes, box_indices = [0], crop_size = (height_crop, width_crop), method=tf.image.ResizeMethod.BILINEAR)[0]
+        else:
+            image = tf.image.resize(image, (height_image,width_image), method=tf.image.ResizeMethod.BILINEAR)
+        return (image)
+    
+
+    
+
+    cmsnet = CMSNet(dl_input_shape=(None, height_crop, width_crop, channels),
+                    num_classes=n_classes, output_stride=output_stride, pooling=pooling,
+                    residual_shortcut=residual_shortcut, backbonetype=backbonetype)
+    cmsnet.summary()
+
+    logdir=build_path+"logs/fit/" + fold_name #Continue
+    weights_path = glob.glob(logdir+'*/weights.last*')[0]
+    logdir = weights_path[:weights_path.find('/weights.')]
+
+    print('Continuing train from '+ weights_path)
+    cmsnet.load_weights(weights_path)
+    
+    image = _normalize_img([image])
+    result = cmsnet.predict(image)
+    
+    return result
+# def eval_one(weights_path, image, height_image, width_image, channels, n_classes, 
+#              output_stride, pooling, residual_shortcut, backbonetype):
+#     cmsnet = CMSNet(dl_input_shape=(None, height_image, width_image, channels),
+#                     num_classes=n_classes, output_stride=output_stride, 
+#                     pooling=pooling, residual_shortcut=residual_shortcut, 
+#                     backbonetype=backbonetype)
+#     cmsnet.summary()
+#     cmsnet.load_weights(weights_path)
+    
+    
+    
+#     label = np.array(Image.open(image_path.split(".jpg")[0]+"-train-label_raw.png")) 
+
+#     image = tf.cast(tf.image.resize(img, (height_image,width_image), method=tf.image.ResizeMethod.BILINEAR),dtype=tf.uint8)
+#     mask = model.run_np(image.numpy())
+    
+#     mask_cityscape = np.array(Image.fromarray(np.uint8(mask)).resize((img.shape[1],img.shape[0])))
+#     #Convert infered result in a offroad mask
+#     #Zero is the ignore label. Every thing is considereted ignore
+#     mask_offroad = np.zeros(mask_cityscape.shape)
+    
+#     mask_offroad[mask_cityscape==0]=1  #road
+#     mask_offroad[mask_cityscape==11]=3 #person #person
+#     mask_offroad[mask_cityscape==12]=3 #rider  #person
+#     mask_offroad[mask_cityscape==13]=2 #car
+#     mask_offroad[mask_cityscape==14]=4 #truck
+#     mask_offroad[mask_cityscape==15]=5 #bus
+#     mask_offroad[mask_cityscape==17]=7 #motocycle
+#     mask_offroad[mask_cityscape==18]=9 #bicycle
+#     return mask_offroad, img, label
 
 
     
