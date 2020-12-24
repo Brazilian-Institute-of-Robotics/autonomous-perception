@@ -1,11 +1,6 @@
-# autonomous_perception
-# Project Name
-
-TODO: Write a project description
+# Autonomous Perception
 
 ## Installation
-
-TODO: Describe the installation process
 You should install
 sudo -H pip3 install googledrivedownloader
 
@@ -17,8 +12,6 @@ libcudnn7
 libcudnn7-dev
 
 ## Usage
-
-TODO: Write usage instructions
 
 ### Compare PSPNET
 To compare with PSPNet you can use our converted pspnet_model.pb ou generate it yourself.
@@ -77,12 +70,6 @@ To run the comparison
 
 ## History
 
-TODO: Write history
 
-## Credits
 
-TODO: Write credits
 
-## License
-
-TODO: Write license
